@@ -62,14 +62,6 @@ class StocksController < ApplicationController
     render json: res
   end
 
-  def quotes
-    symbols = params[:symbols].to_s.split(",")
-    raise BadRequest, "no_symbols_supplied" if symbols.empty?
-
-    entries = Quote.search_symbols(symbols)
-    render json: format_quotes(entries)
-  end
-
   def popularity_history
     id = params[:id]
 
@@ -85,6 +77,9 @@ class StocksController < ApplicationController
     res = with_cache(__method__.to_s, key) do
       entries = Popularity.get_history_for_symbol id, parsed_start_time, parsed_end_time
       raise NotFound unless entries
+      # if params[:daily_datapoints]
+      entries = limit_datapoints_per_day(entries)
+      # end
       format_popularity_history entries
     end
 
@@ -134,53 +129,42 @@ class StocksController < ApplicationController
 
   def quote_history
     id = params[:id]
-    res = with_cache(__method__.to_s, id) do
+    res = with_cache(__method__.to_s, "#{id}-#{!!params[:daily_datapoints]}") do
       entries = Quote.search_by_symbol id
       raise NotFound unless entries
+      entries = limit_datapoints_per_day(entries) if params[:daily_datapoints]
       format_quote_history entries
     end
+
     render json: res
   end
 
   def total_symbols
-    entry = Popularity.total_symbols(hours_ago_param)
+    hours_ago = hours_ago_param
+    res = with_cache(__method__.to_s, "#{hours_ago}") do
+      entry = Popularity.total_symbols(hours_ago)
+      total_symbols = entry ? entry["total_symbols"] : 0
 
-    total_symbols = entry ? entry["total_symbols"] : 0
-
-    render json: {total_symbols: total_symbols}
-  end
-
-  def popularity_bins
-    bucket_count = bin_count_param
-    res = with_cache(__method__.to_s, bucket_count) do
-      entries = Popularity.bucket_popularity bucket_count
-
-      minmax_docs = entries.minmax do |a, b|
-        a[:latest_popularity] <=> b[:latest_popularity]
-      end
-      min_popularity, max_popularity = minmax_docs.map { |doc| doc[:latest_popularity] }
-
-      bucket_size = (max_popularity.to_f - min_popularity.to_f) / bucket_count.to_f
-      binned_entries = entries.group_by do |elem|
-        bucket_index = (elem[:latest_popularity].to_f / bucket_size).floor
-        if bucket_index == bucket_count
-          bucket_index -= 1
-        end
-
-        bucket_index
-      end
-
-      buckets = (0...bucket_count).map { |i| binned_entries.fetch(i, []).size }
-      {
-        min_popularity: min_popularity,
-        max_popularity: max_popularity,
-        buckets: buckets,
-      }
+      {total_symbols: total_symbols}
     end
+
     render json: res
   end
 
   private
+
+  def limit_datapoints_per_day(datapoints)
+    uniq_days = {}
+    date_cutoff = 1.year.ago
+    datapoints.select do |datapoint|
+      date = datapoint["timestamp"] || datapoint["updated_at"]
+      next true if date > date_cutoff # datapoints in the last year don't need to be truncated
+      day = date.strftime('%Y-%m-%d')
+      is_uniq = !uniq_days[day]
+      uniq_days[day] = true
+      is_uniq
+    end
+  end
 
   def hours_ago_param
     if params[:hours_ago]
@@ -214,15 +198,15 @@ class StocksController < ApplicationController
 
   def format_popularity_entries(entries)
     entries.map do |entry|
-      {popularity: entry["latest_popularity"], symbol: entry["symbol"]}
+      { popularity: entry["latest_popularity"], symbol: entry["symbol"], name: entry["name"] }
     end
   end
 
   def format_popularity_entries_csv(entries)
     CSV.generate do |csv|
-      csv << %w[symbol popularity]
+      csv << %w[symbol name popularity]
       entries.each do |entry|
-        csv << entry.values_at("symbol", "popularity")
+        csv << entry.values_at("symbol", "name","popularity")
       end
     end
   end

@@ -6,7 +6,7 @@ class PopularitiesController < ApplicationController
   def largest_popularity_changes
     options = options_from_params
     res = with_cache("largest_popularity_changes", hash_hash(options)) do
-      format_popularity_entries Popularity.largest_popularity_changes(options)
+      Popularity.largest_popularity_changes(options)
     end
     render json: res
   end
@@ -14,7 +14,7 @@ class PopularitiesController < ApplicationController
   def largest_popularity_decreases
     options = options_from_params
     res = with_cache("largest_popularity_decreases", hash_hash(options)) do
-      format_popularity_entries Popularity.largest_popularity_decreases(options)
+      Popularity.largest_popularity_decreases(options)
     end
     render json: res
   end
@@ -22,7 +22,7 @@ class PopularitiesController < ApplicationController
   def largest_popularity_increases
     options = options_from_params
     res = with_cache("largest_popularity_increases", hash_hash(options)) do
-      format_popularity_entries Popularity.largest_popularity_increases(options)
+      Popularity.largest_popularity_increases(options)
     end
     render json: res
   end
@@ -52,6 +52,12 @@ class PopularitiesController < ApplicationController
     if hours_ago <= 0
       raise BadRequest, "please provide a positive integer for hours_ago"
     end
+
+    # Special case for 1 hour lookback.  We need at least 2 updates to compare and there
+    # will never be more than one update per hour.
+    if hours_ago == 1
+      hours_ago = 2
+    end
     hours_ago
   end
 
@@ -67,20 +73,10 @@ class PopularitiesController < ApplicationController
     return unless percentage_param
 
     min_popularity = params[:min_popularity].to_i
-    if min_popularity < 0
-      raise BadRequest, "please provide a positive integer for min_popularity"
+    p min_popularity
+    if ![1, 10, 50, 100, 500, 1000, 10000].include?(min_popularity)
+      raise BadRequest, "min_popularity must be one of 1, 10, 50, 100, 500, 1000, 10000"
     end
     min_popularity
-  end
-
-  def format_popularity_entries(entries)
-    entries.map do |entry|
-      {
-        start_popularity: entry["start_popularity"],
-        end_popularity: entry["end_popularity"],
-        popularity_difference: entry["popularity_difference"],
-        symbol: entry["symbol"],
-      }
-    end
   end
 end

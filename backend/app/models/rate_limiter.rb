@@ -1,30 +1,38 @@
 class RateLimiter
-
-  MAX_REQUESTS_PER_PERIOD = 60 * 5 * 3
-  TIME_PERIOD_IN_SECONDS = 60 * 5
+  MAX_REQUESTS_PER_PERIOD = 33
+  TIME_PERIOD_IN_SECONDS = 45
   BASE_REDIS_KEY = 'request-count-ip'
 
-  def self.should_block_request?(ip)
-    recent_requests(ip).to_i >= MAX_REQUESTS_PER_PERIOD
+  def self.should_block_request?(ip, path)
+    p path
+    if path.starts_with?("/most_popular") || path.starts_with?("/least_popular")
+      return false
+    end
+    recent_requests(ip, path).to_i >= MAX_REQUESTS_PER_PERIOD
   end
 
-  def self.incr_requests(ip)
-    Redis.current.multi do |multi|
-      multi.incr(redis_key(ip))
-      multi.expire(redis_key(ip), TIME_PERIOD_IN_SECONDS)
+  def self.incr_requests(ip, path)
+    if path.starts_with?("/most_popular") || path.starts_with?("/least_popular")
+      return
+    end
+
+    $redis.multi do |multi|
+      key = redis_key(ip, path)
+      multi.incr(key)
+      multi.expire(key, TIME_PERIOD_IN_SECONDS)
     end
   end
 
-  def self.recent_requests(ip)
-    Redis.current.get(redis_key(ip))
+  def self.recent_requests(ip, path)
+    $redis.get(redis_key(ip, path))
   end
 
   def self.block_requests(ip, seconds = TIME_PERIOD_IN_SECONDS)
-    Redis.current.set(redis_key(ip), MAX_REQUESTS_PER_PERIOD, ex: seconds)
+    $redis.set(redis_key(ip, path), MAX_REQUESTS_PER_PERIOD, ex: seconds)
   end
 
-  def self.redis_key(ip)
-    "#{BASE_REDIS_KEY}-#{ip}-#{TIME_PERIOD_IN_SECONDS}-#{Time.current.to_i / TIME_PERIOD_IN_SECONDS}"
+  def self.redis_key(ip, path)
+    path = path.starts_with?("/stocks/") ? path.split("/")[3] : path
+    "#{BASE_REDIS_KEY}-#{ip}-#{path}-#{TIME_PERIOD_IN_SECONDS}-#{Time.current.to_i / TIME_PERIOD_IN_SECONDS}"
   end
-
 end

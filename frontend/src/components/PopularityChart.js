@@ -11,6 +11,7 @@ import 'echarts/lib/component/tooltip';
 import 'echarts/lib/component/legend';
 import 'echarts/lib/component/dataZoom';
 import 'echarts/lib/component/toolbox';
+import 'echarts/lib/component/graphic';
 import { IconSvgPaths20 } from '@blueprintjs/icons/lib/esm/generated/iconSvgPaths';
 import * as R from 'ramda';
 
@@ -178,9 +179,16 @@ const getBaseConfigDefaults = mobile => ({
   animation: true,
 });
 
-const mapQuotes = memoizeOne(quoteHistory =>
-  quoteHistory.map(({ timestamp, last_trade_price: lastTradePrice }) => [new Date(timestamp), lastTradePrice])
-);
+const mapQuotes = memoizeOne(quoteHistory => {
+  let lastTimestamp;
+  return quoteHistory
+    .filter(({ timestamp }) => {
+      const isDup = timestamp === lastTimestamp;
+      lastTimestamp = timestamp;
+      return !isDup;
+    })
+    .map(({ timestamp, last_trade_price: lastTradePrice }) => [new Date(timestamp), lastTradePrice]);
+});
 
 const mapPopularity = memoizeOne(popularityHistory =>
   popularityHistory.map(({ timestamp, popularity }) => [new Date(timestamp), popularity])
@@ -237,6 +245,17 @@ const getChartOptions = ({ symbol, quoteHistory = [], popularityHistory = [], zo
         minInterval: 1,
       },
     ],
+    graphic: mobile
+      ? undefined
+      : {
+          type: 'text',
+          top: 6,
+          right: 6,
+          style: {
+            text: 'robintrack.net',
+            fill: '#eee',
+          },
+        },
     series: [
       {
         ...seriesDefaults,
@@ -293,6 +312,7 @@ const PopularityChart = ({ style, symbol, popularityHistory, quoteHistory, mobil
   const [{ zoomStart, zoomEnd }, setZoom] = useState({ zoomStart: 0, zoomEnd: 100 });
   const options = useMemo(
     () => getChartOptions({ symbol, popularityHistory, quoteHistory, zoomStart, zoomEnd, mobile }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [symbol, popularityHistory, quoteHistory, mobile]
   );
 
